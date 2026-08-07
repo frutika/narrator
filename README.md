@@ -1,0 +1,100 @@
+# Narrator
+
+Lokalni alat za naraciju preko videa. Azure Neural TTS za glas, ffmpeg za miks.
+Nema npm ovisnosti — samo Node 18+ i ffmpeg.
+
+## Postavljanje
+
+**1. Azure Speech resurs.** Treba ti vlastiti u Azure portalu (Speech service).
+Besplatni **F0** sloj daje 500 000 znakova mjesečno za neuralne glasove, što je
+za naraciju i više nego dovoljno.
+
+F0 ima i limit od **20 zahtjeva u 60 sekundi**. Projekt s više linija od toga
+alat rješava sam — na `429` pričeka koliko Azure traži i nastavi, do 5 pokušaja
+po liniji. U konzoli vidiš kad se to dogodi.
+
+**2. Ključ i regija.** Postavi ih kao varijable okoline — ključ tako nikad ne
+završi u datoteci:
+
+```
+setx AZURE_SPEECH_KEY "tvoj-kljuc"
+setx AZURE_SPEECH_REGION "northeurope"
+```
+
+Regija mora biti točno onakva kakvu Azure koristi u URL-u — malim slovima, bez
+razmaka (`northeurope`, `westeurope`…). Portal je prikazuje kao „North Europe",
+a to API ne prihvaća. Kriva regija daje `401`, koji izgleda kao problem s ključem.
+
+Otvori novi terminal da ih pokupi. Alternativa je `config.json` u ovom folderu
+(`{ "azureKey": "...", "azureRegion": "westeurope" }`) — već je u `.gitignore`.
+
+**3. Pokretanje.** Dvoklik na `start.cmd`, ili:
+
+```bash
+node server.js
+```
+
+Otvori `http://localhost:4173`.
+
+## Kako se koristi
+
+1. **Video** — zalijepi punu putanju, klikni Učitaj. Pročita trajanje i javi ima
+   li zvučni zapis.
+2. **Glas** — odaberi jezik pa glas. Glasovi označeni ★ podržavaju stilove
+   (`cheerful`, `sad`, `newscast`, `calm`…). Tempo i visina su postotna odstupanja.
+3. **Linije** — jedna rečenica ili misao po liniji. `⚙` otvara pregaženja za tu
+   liniju: drugi glas, drugi stil, drugi tempo. **Tu se radi višeglasje** — dvije
+   linije s različitim glasom daju dijalog.
+4. **Sintetiziraj** — šalje samo izmijenjene linije. Nepromijenjene se čitaju iz
+   predmemorije, pa ponovna sinteza ne troši kvotu.
+5. **Timing** — „Rasporedi automatski" ravnomjerno posloži linije po trajanju
+   videa uz zadani uvod i odjavu. Blokove na timelineu možeš povući mišem;
+   crveni blok znači preklapanje s idućom linijom ili sa zabranjenom zonom.
+
+   **„Skeniraj original"** pronalazi mjesta gdje video **već ima govor** i
+   označi ih crveno na timelineu. Raspoređivanje ih zaobilazi — original uvijek
+   ima prednost. „Razmak od zona" je zaštitni pojas sa svake strane (zadano
+   0.6 s). Ako detekcija promaši, zone su obični brojevi u `project.json` pod
+   `blocked`, pa se mogu dopisati ručno.
+6. **Miks i render** — podloga se automatski spušta ispod glasa. Render kopira
+   video zapis bez rekodiranja, pa je brz i ne gubi kvalitetu slike.
+
+Projekt se sprema u `projects/<naziv>/` (`project.json` + `wav/`) i autosprema
+svakih 15 sekundi.
+
+## Spuštanje podloge
+
+Izmjereno na stvarnom materijalu, ne procijenjeno:
+
+| Postavka | Koliko padne podloga |
+|---|---|
+| blago | ~6 dB |
+| srednje | ~10 dB |
+| jako | ~14 dB |
+| maksimalno | ~18 dB |
+
+Srednje je dobra zadana vrijednost: glas je jasno iznad, a podloga se i dalje
+čuje. Maksimalno praktički ugasi glazbu dok netko govori.
+
+Detektor duckinga ima **vlastito fiksno pojačanje** (`volume=4.0` u
+`buildFilter`), odvojeno od klizača „Glasnoća naracije". Zato dubina duckinga
+ostaje ista bez obzira koristiš li glasan neuralni glas ili tihu vlastitu
+snimku. Ako mijenjaš to pojačanje, gornja tablica više ne vrijedi — treba je
+ponovno izmjeriti.
+
+## Kako detekcija govora radi
+
+Voiceover se gotovo uvijek miksa u centar, a glazba je široka. Alat zato razdvoji
+mid (L+R) i side (L−R) kanal, propusti oba kroz govorni pojas 300–3400 Hz i
+traži prozore u kojima mid nadvisuje side puno više nego inače. To pouzdano
+razlikuje govor od glazbe bez ikakvog prepoznavanja riječi.
+
+Ako je zvuk **mono**, side kanal je prazan i metoda ne radi — alat to javi
+umjesto da označi cijeli video kao govor. U tom slučaju zone se upisuju ručno.
+
+## Ograničenja
+
+- Render traži da naracija stane u trajanje videa. Ako ne stane, alat to javi
+  prije rendera umjesto da odreže kraj.
+- Video zapis se kopira, ne rekodira — izlazni format prati ulazni.
+- Ako video nema zvuk, „Zadrži originalni zvuk" se sam isključi.

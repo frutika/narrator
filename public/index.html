@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="hr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Narrator</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header>
+    <h1>Narrator</h1>
+    <div class="head-right">
+      <input id="projectName" placeholder="naziv projekta" />
+      <select id="projectList"><option value="">— otvori projekt —</option></select>
+      <button id="save" class="ghost">Spremi</button>
+      <span id="status" class="pill"></span>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>1 · Video</h2>
+      <div class="row">
+        <input id="videoPath" class="grow" placeholder="C:\Users\...\video.mp4" />
+        <button id="probe">Učitaj</button>
+      </div>
+      <p id="videoInfo" class="muted">Nije učitan.</p>
+    </section>
+
+    <section>
+      <h2>2 · Glas</h2>
+      <div class="row wrap">
+        <label>Jezik
+          <select id="locale"></select>
+        </label>
+        <label>Glas
+          <select id="voice"></select>
+        </label>
+        <label>Stil
+          <select id="style"><option value="none">bez stila</option></select>
+        </label>
+        <label>Jačina stila <output id="styleDegreeOut">1.0</output>
+          <input id="styleDegree" type="range" min="0.5" max="2" step="0.1" value="1" />
+        </label>
+        <label>Tempo <output id="rateOut">0%</output>
+          <input id="rate" type="range" min="-40" max="40" step="1" value="0" />
+        </label>
+        <label>Visina <output id="pitchOut">0%</output>
+          <input id="pitch" type="range" min="-20" max="20" step="1" value="0" />
+        </label>
+      </div>
+      <p class="muted">Ovo su zadane vrijednosti. Svaka linija ih može pregaziti vlastitima.</p>
+    </section>
+
+    <section>
+      <h2>3 · Linije</h2>
+      <div id="segments"></div>
+      <div class="row">
+        <button id="addSeg" class="ghost">+ Dodaj liniju</button>
+        <button id="synth">Sintetiziraj</button>
+        <span id="synthInfo" class="muted"></span>
+      </div>
+    </section>
+
+    <section>
+      <h2>4 · Timing</h2>
+      <div class="row wrap">
+        <label>Uvod (s)<input id="leadIn" type="number" step="0.5" value="3.5" /></label>
+        <label>Odjava (s)<input id="tailOut" type="number" step="0.5" value="6" /></label>
+        <label>Razmak od zona (s)<input id="blockPad" type="number" step="0.1" value="0.6" /></label>
+        <button id="autoSpace" class="ghost">Rasporedi automatski</button>
+      </div>
+      <div class="row wrap">
+        <button id="scan" class="ghost">Skeniraj original</button>
+        <button id="clearZones" class="ghost">Očisti zone</button>
+        <span id="zoneInfo" class="muted">Zone nisu skenirane.</span>
+      </div>
+      <p id="timingInfo" class="muted"></p>
+      <div id="timeline" class="timeline"><div class="tl-empty">Sintetiziraj linije da se pojavi timeline.</div></div>
+    </section>
+
+    <section>
+      <h2>5 · Miks i render</h2>
+      <div class="row wrap">
+        <label class="check"><input id="keepMusic" type="checkbox" checked /> Zadrži originalni zvuk</label>
+        <label>Glasnoća podloge <output id="musicGainOut">0.85</output>
+          <input id="musicGain" type="range" min="0" max="1.5" step="0.05" value="0.85" />
+        </label>
+        <label>Glasnoća naracije <output id="voiceGainOut">1.0</output>
+          <input id="voiceGain" type="range" min="0.5" max="4" step="0.1" value="1.0" />
+        </label>
+        <label>Spuštanje podloge
+          <select id="duck">
+            <option value="light">blago (~6 dB)</option>
+            <option value="medium" selected>srednje (~10 dB)</option>
+            <option value="strong">jako (~14 dB)</option>
+            <option value="max">maksimalno (~18 dB)</option>
+          </select>
+        </label>
+      </div>
+      <div class="row">
+        <input id="outPath" class="grow" placeholder="izlazna datoteka .mp4" />
+        <button id="render">Renderiraj</button>
+      </div>
+      <p id="renderInfo" class="muted"></p>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
