@@ -80,7 +80,38 @@
     </section>
 
     <section>
-      <h2>5 · Miks i render</h2>
+      <h2>5 · Titlovi</h2>
+      <div class="row wrap">
+        <label>Što se prikazuje
+          <select id="titleMode">
+            <option value="off">ništa</option>
+            <option value="captions">izgovoreni tekst</option>
+            <option value="titles">samo kratki naslovi</option>
+          </select>
+        </label>
+        <label>Položaj
+          <select id="titlePos">
+            <option value="bottom">dolje</option>
+            <option value="top">gore</option>
+          </select>
+        </label>
+        <label>Veličina <output id="titleSizeOut">48</output>
+          <input id="titleSize" type="range" min="24" max="96" step="2" value="48" />
+        </label>
+        <label class="check"><input id="titleBurn" type="checkbox" /> Upiši u sliku</label>
+        <label class="check"><input id="titleSrt" type="checkbox" checked /> Spremi .srt uz video</label>
+        <button id="downloadSrt" class="ghost">Preuzmi .srt</button>
+      </div>
+      <p class="muted">
+        Kratki naslov po liniji upisuješ pod <strong>⚙</strong>. Ako ga nema, „izgovoreni tekst"
+        koristi cijelu rečenicu. <strong>Upisivanje u sliku traži ponovno kodiranje videa</strong> —
+        render traje bitno duže i slika se blago degradira. Datoteka .srt ne dira sliku i to je
+        ono što se šalje na YouTube kao pravi titlovi.
+      </p>
+    </section>
+
+    <section>
+      <h2>6 · Miks i render</h2>
       <div class="row wrap">
         <label class="check"><input id="keepMusic" type="checkbox" checked /> Zadrži originalni zvuk</label>
         <label>Glasnoća podloge <output id="musicGainOut">0.85</output>

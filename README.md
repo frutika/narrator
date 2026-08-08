@@ -56,8 +56,25 @@ Otvori `http://localhost:4173`.
    ima prednost. „Razmak od zona" je zaštitni pojas sa svake strane (zadano
    0.6 s). Ako detekcija promaši, zone su obični brojevi u `project.json` pod
    `blocked`, pa se mogu dopisati ručno.
-6. **Miks i render** — podloga se automatski spušta ispod glasa. Render kopira
+6. **Titlovi** — dva odvojena pojma, namjerno se ne miješaju:
+
+   - **izgovoreni tekst** uzima cijelu rečenicu iz linije. To je ono što ide na
+     YouTube kao titlovi, pa mora odgovarati zvuku — i zbog pristupačnosti i
+     zbog YouTubeovih pravila.
+   - **kratki naslovi** uzimaju polje „Naslov na ekranu" pod `⚙`. Linija bez
+     naslova tada ne prikazuje ništa, pa se natpisi mogu staviti samo gdje
+     imaju smisla.
+
+   Naslov nije dio hasha za predmemoriju, pa njegova izmjena **ne troši Azure
+   kvotu**.
+
+7. **Miks i render** — podloga se automatski spušta ispod glasa. Render kopira
    video zapis bez rekodiranja, pa je brz i ne gubi kvalitetu slike.
+
+   **Iznimka: „Upiši u sliku".** Crtanje teksta u sliku onemogućuje kopiranje
+   zapisa, pa se video ponovno kodira (libx264, CRF 18). Render traje bitno duže
+   i slika se blago degradira. Ako ti titlovi trebaju samo za YouTube, ostavi to
+   isključeno i koristi `.srt` — slika ostaje netaknuta.
 
 Projekt se sprema u `projects/<naziv>/` (`project.json` + `wav/`) i autosprema
 svakih 15 sekundi.

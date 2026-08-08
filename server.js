@@ -231,6 +231,78 @@ async function synthesize(cfg, ssml, outFile, attempt = 1) {
   await fsp.writeFile(outFile, Buffer.from(await res.arrayBuffer()));
 }
 
+// ---------------------------------------------------------------- subtitles
+
+// The two modes are deliberately not interchangeable. Captions must transcribe
+// what is actually said - anything else breaks accessibility and YouTube's own
+// rules for caption tracks. Titles are separate editorial wording that may say
+// something different, or nothing at all.
+function screenText(seg, mode) {
+  if (mode === 'titles') return (seg.title || '').trim();
+  if (mode === 'captions') return (seg.text || '').trim();
+  return '';
+}
+
+const pad = (n, w = 2) => String(Math.floor(n)).padStart(w, '0');
+
+function srtTime(s) {
+  const ms = Math.round((s - Math.floor(s)) * 1000);
+  return `${pad(s / 3600)}:${pad((s / 60) % 60)}:${pad(s % 60)},${pad(ms, 3)}`;
+}
+
+function assTime(s) {
+  const cs = Math.round((s - Math.floor(s)) * 100);
+  return `${Math.floor(s / 3600)}:${pad((s / 60) % 60)}:${pad(s % 60)}.${pad(cs)}`;
+}
+
+function buildSrt(segments, mode) {
+  return segments
+    .map((s) => ({ ...s, screen: screenText(s, mode) }))
+    .filter((s) => s.screen && s.duration > 0)
+    .sort((a, b) => a.start - b.start)
+    .map((s, i) =>
+      `${i + 1}\n${srtTime(s.start)} --> ${srtTime(s.start + s.duration)}\n${s.screen}\n`
+    )
+    .join('\n');
+}
+
+// ASS rather than SRT for burn-in: it carries the styling, so the look does not
+// depend on whatever defaults the renderer happens to have.
+function buildAss(segments, mode, opts) {
+  const { width = 1920, height = 1080, fontSize = 48, position = 'bottom', font = 'Arial' } = opts;
+  const alignment = position === 'top' ? 8 : 2;
+  const marginV = Math.round(height * 0.055);
+
+  const head = [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    'WrapStyle: 0',
+    'ScaledBorderAndShadow: yes',
+    `PlayResX: ${width}`,
+    `PlayResY: ${height}`,
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    `Style: Narr,${font},${fontSize},&H00FFFFFF,&H00FFFFFF,&H96000000,&H64000000,0,0,0,0,100,100,0,0,1,3,2,${alignment},${Math.round(width * 0.08)},${Math.round(width * 0.08)},${marginV},1`,
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+  ].join('\n');
+
+  const events = segments
+    .map((s) => ({ ...s, screen: screenText(s, mode) }))
+    .filter((s) => s.screen && s.duration > 0)
+    .sort((a, b) => a.start - b.start)
+    .map((s) => {
+      const text = s.screen.replace(/\r?\n/g, '\\N').replace(/[{}]/g, '');
+      // Quick fade so lines appear with the voice rather than snapping in.
+      return `Dialogue: 0,${assTime(s.start)},${assTime(s.start + s.duration)},Narr,,0,0,0,,{\\fad(180,180)}${text}`;
+    })
+    .join('\n');
+
+  return `${head}\n${events}\n`;
+}
+
 // ---------------------------------------------------------------- projects
 
 const projectDir = (name) => path.join(PROJECTS, slug(name));
@@ -299,24 +371,49 @@ function buildFilter(segments, opts) {
   return parts.join(';');
 }
 
+// ffmpeg reads the filter argument itself, so a Windows path has to be handed
+// over with its backslashes and drive colon escaped or the filter never loads.
+const escapeFilterPath = (p) => p.replace(/\\/g, '/').replace(/:/g, '\\:');
+
 async function renderJob(cfg, jobId, body) {
   const job = jobs.get(jobId);
   try {
-    const { videoPath, segments, outPath } = body;
+    const { videoPath, segments, outPath, titles } = body;
     const dir = projectDir(body.projectName);
+    const burn = titles?.burn && titles.mode && titles.mode !== 'off';
 
+    const filter = buildFilter(segments, body.options);
     const args = ['-y', '-i', videoPath];
     for (const s of segments) args.push('-i', path.join(dir, 'wav', s.file));
 
-    args.push(
-      '-filter_complex', buildFilter(segments, body.options),
-      '-map', '0:v', '-map', '[aout]',
-      '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
-      '-shortest', outPath
-    );
+    if (burn) {
+      const assFile = path.join(dir, 'titles.ass');
+      await fsp.writeFile(assFile, buildAss(titles.segments, titles.mode, titles.style || {}), 'utf8');
+
+      // Drawing text into the picture makes a stream copy impossible - the video
+      // has to be re-encoded. Visually lossless settings, but no longer instant.
+      args.push(
+        '-filter_complex', `${filter};[0:v]ass='${escapeFilterPath(assFile)}'[vout]`,
+        '-map', '[vout]', '-map', '[aout]',
+        '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p'
+      );
+    } else {
+      args.push('-filter_complex', filter, '-map', '0:v', '-map', '[aout]', '-c:v', 'copy');
+    }
+
+    args.push('-c:a', 'aac', '-b:a', '192k', '-shortest', outPath);
 
     job.status = 'running';
+    job.reencoding = Boolean(burn);
     await run(cfg.ffmpeg, ['-hide_banner', '-loglevel', 'error', ...args]);
+
+    // A sidecar file is worth having even when the text is burned in - it is
+    // what you upload to YouTube as real captions.
+    if (titles?.srt && titles.mode && titles.mode !== 'off') {
+      const srtPath = outPath.replace(/\.[^.\\/]+$/, '') + '.srt';
+      await fsp.writeFile(srtPath, buildSrt(titles.segments, titles.mode), 'utf8');
+      job.srt = srtPath;
+    }
 
     job.status = 'done';
     job.output = outPath;
@@ -445,6 +542,17 @@ const server = http.createServer(async (req, res) => {
         results.push({ id: seg.id, file, cached, duration: await probeDuration(cfg, full) });
       }
       return send(res, 200, { results });
+    }
+
+    if (req.method === 'POST' && route === '/api/subtitles') {
+      const { segments, mode } = await readBody(req);
+      const srt = buildSrt(segments || [], mode || 'captions');
+      if (!srt.trim()) return send(res, 400, { error: 'Nema teksta za titlove.' });
+      res.writeHead(200, {
+        'Content-Type': 'application/x-subrip; charset=utf-8',
+        'Content-Disposition': 'attachment; filename="titlovi.srt"',
+      });
+      return res.end(srt);
     }
 
     if (req.method === 'POST' && route === '/api/render') {

@@ -36,6 +36,9 @@ const blank = () => ({
   outPath: '',
   // Neural TTS already arrives close to full scale, so it needs no boost.
   mix: { keepMusic: true, musicGain: 0.85, voiceGain: 1.0, duck: 'medium' },
+  videoWidth: 1920,
+  videoHeight: 1080,
+  titles: { mode: 'off', burn: false, srt: true, fontSize: 48, position: 'bottom' },
 });
 
 let S = blank();
@@ -65,6 +68,8 @@ function addSegment(text = '') {
   S.segments.push({
     id: 's' + String(S.nextId++).padStart(2, '0'),
     text,
+    // Short on-screen wording. Never spoken - only drawn or written to .srt.
+    title: '',
     voice: '',
     style: '',
     styleDegree: null,
@@ -99,6 +104,7 @@ function renderSegments() {
       </div>
       <textarea data-act="text" placeholder="tekst linije">${seg.text.replace(/</g, '&lt;')}</textarea>
       <div class="seg-over">
+        <label class="grow-field">Naslov na ekranu<input data-act="title" placeholder="kratko, ili prazno" value="${(seg.title || '').replace(/"/g, '&quot;')}" /></label>
         <label>Glas<select data-act="voice"></select></label>
         <label>Stil<select data-act="style"></select></label>
         <label>Tempo<input data-act="rate" type="number" step="1" placeholder="zadano" value="${seg.rate ?? ''}" /></label>
@@ -125,6 +131,9 @@ function renderSegments() {
       if (!act) return;
       const v = e.target.value;
       if (act === 'text') seg.text = v;
+      // Only the on-screen wording - deliberately not part of audioKey, so
+      // editing it never triggers a paid re-synthesis.
+      if (act === 'title') seg.title = v;
       if (act === 'voice') { seg.voice = v; fillStyleSelect(el.querySelector('[data-act="style"]'), v || S.voice, seg.style, true); }
       if (act === 'style') seg.style = v;
       if (act === 'rate') seg.rate = v === '' ? null : Number(v);
@@ -361,6 +370,9 @@ async function probe() {
   });
   S.videoPath = $('videoPath').value.trim();
   S.videoDuration = info.duration;
+  // Burned-in titles are laid out against these, so they must match the source.
+  S.videoWidth = info.width || 1920;
+  S.videoHeight = info.height || 1080;
   $('videoInfo').textContent =
     `${fmt(info.duration)} · ${info.width}×${info.height} · ${info.hasAudio ? 'ima zvučni zapis' : 'BEZ zvuka — podloga se ne može zadržati'}`;
   if (!info.hasAudio) { $('keepMusic').checked = false; S.mix.keepMusic = false; }
@@ -417,17 +429,32 @@ async function render() {
         voiceGain: S.mix.voiceGain,
         duck: DUCK[S.mix.duck],
       },
+      titles: {
+        mode: S.titles.mode,
+        burn: S.titles.burn,
+        srt: S.titles.srt,
+        segments: ready.map((s) => ({ title: s.title, text: s.text, start: s.start, duration: s.duration })),
+        style: {
+          width: S.videoWidth,
+          height: S.videoHeight,
+          fontSize: S.titles.fontSize,
+          position: S.titles.position,
+        },
+      },
     }),
   });
 
+  const burning = S.titles.burn && S.titles.mode !== 'off';
   $('render').disabled = true;
-  $('renderInfo').textContent = 'Renderiram…';
+  $('renderInfo').textContent = burning
+    ? 'Renderiram — video se ponovno kodira zbog titlova, ovo traje bitno duže…'
+    : 'Renderiram…';
   const poll = setInterval(async () => {
     const job = await api(`/api/render/${jobId}`);
     if (job.status === 'done') {
       clearInterval(poll);
       $('render').disabled = false;
-      $('renderInfo').textContent = `Gotovo: ${job.output}`;
+      $('renderInfo').textContent = `Gotovo: ${job.output}` + (job.srt ? ` · titlovi: ${job.srt}` : '');
       $('renderInfo').className = 'muted';
     } else if (job.status === 'error') {
       clearInterval(poll);
@@ -436,6 +463,29 @@ async function render() {
       $('renderInfo').className = 'muted stale';
     }
   }, 800);
+}
+
+async function downloadSrt() {
+  const mode = S.titles.mode === 'off' ? 'captions' : S.titles.mode;
+  const ready = S.segments.filter((s) => s.duration > 0);
+  if (!ready.length) throw new Error('Nema sintetiziranih linija.');
+
+  const res = await fetch('/api/subtitles', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      mode,
+      segments: ready.map((s) => ({ title: s.title, text: s.text, start: s.start, duration: s.duration })),
+    }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Neuspjelo.');
+
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${S.name || 'titlovi'}.srt`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 const save = () => api('/api/project', {
@@ -468,6 +518,11 @@ function hydrate() {
   $('musicGain').value = S.mix.musicGain;
   $('voiceGain').value = S.mix.voiceGain;
   $('duck').value = S.mix.duck;
+  $('titleMode').value = S.titles.mode;
+  $('titlePos').value = S.titles.position;
+  $('titleSize').value = S.titles.fontSize;
+  $('titleBurn').checked = S.titles.burn;
+  $('titleSrt').checked = S.titles.srt;
   syncOutputs();
   if (VOICES.length) {
     // Point the language filter at the project's own voice first. Without this
@@ -487,6 +542,7 @@ function syncOutputs() {
   $('pitchOut').textContent = `${S.pitch}%`;
   $('musicGainOut').textContent = Number(S.mix.musicGain).toFixed(2);
   $('voiceGainOut').textContent = Number(S.mix.voiceGain).toFixed(1);
+  $('titleSizeOut').textContent = S.titles.fontSize;
 }
 
 const guard = (fn) => async (...a) => {
@@ -523,6 +579,13 @@ function wire() {
     $(id).oninput = (e) => (S[key] = Number(e.target.value));
   }
   $('blockPad').oninput = (e) => { S.blockPad = Number(e.target.value); drawTimeline(); };
+  $('titleMode').onchange = (e) => (S.titles.mode = e.target.value);
+  $('titlePos').onchange = (e) => (S.titles.position = e.target.value);
+  $('titleSize').oninput = (e) => { S.titles.fontSize = Number(e.target.value); syncOutputs(); };
+  $('titleBurn').onchange = (e) => (S.titles.burn = e.target.checked);
+  $('titleSrt').onchange = (e) => (S.titles.srt = e.target.checked);
+  $('downloadSrt').onclick = guard(downloadSrt);
+
   $('keepMusic').onchange = (e) => (S.mix.keepMusic = e.target.checked);
   $('duck').onchange = (e) => (S.mix.duck = e.target.value);
   $('musicGain').oninput = (e) => { S.mix.musicGain = Number(e.target.value); syncOutputs(); };
