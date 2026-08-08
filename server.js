@@ -255,6 +255,17 @@ function assTime(s) {
   return `${Math.floor(s / 3600)}:${pad((s / 60) % 60)}:${pad(s % 60)}.${pad(cs)}`;
 }
 
+// Facebook accepts SRT only, and only when the file is named
+// <video>.<lang>_<COUNTRY>.srt - lower-case language, upper-case country. Get it
+// wrong and the upload is rejected without explaining why. YouTube does not care
+// about the name, so this format is safe for both.
+function srtFileName(baseName, locale) {
+  const base = (baseName || 'titlovi').replace(/\.[^.]+$/, '').replace(/[^\w.-]+/g, '-');
+  const m = /^([a-z]{2,3})[-_]([A-Za-z]{2})$/.exec((locale || '').trim());
+  if (!m) return `${base}.srt`;
+  return `${base}.${m[1].toLowerCase()}_${m[2].toUpperCase()}.srt`;
+}
+
 function buildSrt(segments, mode) {
   return segments
     .map((s) => ({ ...s, screen: screenText(s, mode) }))
@@ -410,7 +421,10 @@ async function renderJob(cfg, jobId, body) {
     // A sidecar file is worth having even when the text is burned in - it is
     // what you upload to YouTube as real captions.
     if (titles?.srt && titles.mode && titles.mode !== 'off') {
-      const srtPath = outPath.replace(/\.[^.\\/]+$/, '') + '.srt';
+      const srtPath = path.join(
+        path.dirname(outPath),
+        srtFileName(path.basename(outPath), titles.locale)
+      );
       await fsp.writeFile(srtPath, buildSrt(titles.segments, titles.mode), 'utf8');
       job.srt = srtPath;
     }
@@ -545,12 +559,12 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && route === '/api/subtitles') {
-      const { segments, mode } = await readBody(req);
+      const { segments, mode, baseName, locale } = await readBody(req);
       const srt = buildSrt(segments || [], mode || 'captions');
       if (!srt.trim()) return send(res, 400, { error: 'Nema teksta za titlove.' });
       res.writeHead(200, {
         'Content-Type': 'application/x-subrip; charset=utf-8',
-        'Content-Disposition': 'attachment; filename="titlovi.srt"',
+        'Content-Disposition': `attachment; filename="${srtFileName(baseName, locale)}"`,
       });
       return res.end(srt);
     }

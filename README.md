@@ -68,6 +68,12 @@ Otvori `http://localhost:4173`.
    Naslov nije dio hasha za predmemoriju, pa njegova izmjena **ne troši Azure
    kvotu**.
 
+   **Imenovanje `.srt` datoteke nije kozmetika.** Facebook prihvaća titlove samo
+   ako se datoteka zove `naziv.jezik_DRŽAVA.srt` — mala slova za jezik, velika za
+   državu (`lumenta-labs-iris.en_US.srt`). Krivo ime i upload se odbija bez
+   objašnjenja. Alat lokal izvodi iz odabranog glasa, pa isto ime radi i na
+   YouTubeu, koji na naziv ne obraća pažnju.
+
 7. **Miks i render** — podloga se automatski spušta ispod glasa. Render kopira
    video zapis bez rekodiranja, pa je brz i ne gubi kvalitetu slike.
 

@@ -433,6 +433,7 @@ async function render() {
         mode: S.titles.mode,
         burn: S.titles.burn,
         srt: S.titles.srt,
+        locale: localeOf(S.voice),
         segments: ready.map((s) => ({ title: s.title, text: s.text, start: s.start, duration: s.duration })),
         style: {
           width: S.videoWidth,
@@ -465,16 +466,30 @@ async function render() {
   }, 800);
 }
 
+// "en-US-Iris:MAI-Voice-1" -> "en-US". Facebook needs it to name the file.
+const localeOf = (voice) => (voice || '').split('-').slice(0, 2).join('-');
+
+// The server decides the exact filename, so the Facebook naming rule lives in
+// one place. Read it back from the response instead of guessing here.
+function filenameFrom(res, fallback) {
+  const cd = res.headers.get('content-disposition') || '';
+  return (/filename="([^"]+)"/.exec(cd) || [])[1] || fallback;
+}
+
 async function downloadSrt() {
   const mode = S.titles.mode === 'off' ? 'captions' : S.titles.mode;
   const ready = S.segments.filter((s) => s.duration > 0);
   if (!ready.length) throw new Error('Nema sintetiziranih linija.');
+
+  const base = (S.outPath || S.videoPath || S.name || 'titlovi').split(/[\\/]/).pop();
 
   const res = await fetch('/api/subtitles', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       mode,
+      baseName: base,
+      locale: localeOf(S.voice),
       segments: ready.map((s) => ({ title: s.title, text: s.text, start: s.start, duration: s.duration })),
     }),
   });
@@ -483,9 +498,10 @@ async function downloadSrt() {
   const url = URL.createObjectURL(await res.blob());
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${S.name || 'titlovi'}.srt`;
+  a.download = filenameFrom(res, 'titlovi.srt');
   a.click();
   URL.revokeObjectURL(url);
+  $('renderInfo').textContent = `Titlovi spremljeni kao ${a.download}`;
 }
 
 const save = () => api('/api/project', {
