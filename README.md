@@ -104,9 +104,28 @@ svakih 15 sekundi.
 4. **„Rasporedi automatski"** — trajanje izgovora razlikuje se po jeziku, pa
    stari timing više ne odgovara.
 
-Strojni prijevod je nacrt, ne isporuka. Za promo video koji prodaje kvalitetu
-pročitaj ga prije sinteze — pogotovo nazive proizvoda i stručne izraze, koje
-prevoditelji vole prevesti iako ne bi smjeli.
+### Zaštićeni pojmovi
+
+Polje **„Ne prevodi"** drži nazive koje prevoditelj ne smije dirati. Bez njega
+Azure „The Dog Habit" pretvori u „Navika psa", a „Unmasked Words" u „Otkrivene
+riječi" — izmjereno, ne pretpostavljeno. Alat te pojmove šalje kroz Azureov
+dynamic dictionary, pa izlaze doslovno onakvi kakve si ih upisao.
+
+Zadano su tu svi tvoji brendovi. Dodaj svaki novi naziv prije prvog prijevoda.
+
+### Strojni prijevod je nacrt, ne isporuka
+
+Nazivi su riješeni, ali **idiomi nisu**. Izmjereno na tvom scenariju:
+
+| Original | Strojno HR | Strojno DE |
+|---|---|---|
+| „We run on it" | „Radimo na tome" | „Wir laufen darauf" |
+
+Prvo znači „još radimo na tome". Drugo doslovno „hodamo po tome". Rečenica koja
+nosi cijeli dokaz postala je besmislena na oba jezika.
+
+Zato prevedene linije nose oznaku **„strojni nacrt"** koja nestane tek kad ih
+ručno dotakneš. Pročitaj ih prije sinteze — posebno rečenice koje nose poantu.
 
 ### Ključ za prevoditelj
 

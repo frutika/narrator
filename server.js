@@ -249,7 +249,40 @@ const langCode = (locale) => (locale || '').split('-')[0].toLowerCase();
  * Machine translation is a first draft, never a delivery. It exists so nobody
  * retypes twelve lines by hand; the wording still gets read before it is voiced.
  */
-async function translateTexts(cfg, texts, to, from) {
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Brand names must survive translation. Left alone, Azure turns "The Dog Habit"
+ * into "Navika psa" and "Unmasked Words" into "Otkrivene riječi" - measured, not
+ * guessed. Its dynamic dictionary markup pins a term to an exact output.
+ *
+ * Matches are swapped for placeholders first so the markup we insert can never
+ * be matched again by a shorter term.
+ */
+function protectTerms(text, terms) {
+  if (!terms?.length) return text;
+
+  const sorted = [...new Set(terms.map((t) => t.trim()).filter(Boolean))]
+    .sort((a, b) => b.length - a.length);
+
+  const found = [];
+  let out = text;
+
+  sorted.forEach((term) => {
+    const re = new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(term)}(?![\\p{L}\\p{N}])`, 'gu');
+    out = out.replace(re, () => {
+      found.push(term);
+      return `\u0000${found.length - 1}\u0000`;
+    });
+  });
+
+  return out.replace(/\u0000(\d+)\u0000/g, (_, i) => {
+    const t = found[Number(i)];
+    return `<mstrans:dictionary translation="${t}">${t}</mstrans:dictionary>`;
+  });
+}
+
+async function translateTexts(cfg, texts, to, from, protect = []) {
   if (!cfg.translatorKey) {
     throw new Error('AZURE_TRANSLATOR_KEY nije postavljen — vidi README.');
   }
@@ -278,7 +311,7 @@ async function translateTexts(cfg, texts, to, from) {
         'Ocp-Apim-Subscription-Region': cfg.translatorRegion,
         'Content-Type': 'application/json; charset=UTF-8',
       },
-      body: JSON.stringify(batch.map((t) => ({ Text: t }))),
+      body: JSON.stringify(batch.map((t) => ({ Text: protectTerms(t, protect) }))),
     });
     if (!res.ok) {
       const detail = await res.text().catch(() => '');
@@ -656,7 +689,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && route === '/api/translate') {
-      const { texts, to, from } = await readBody(req);
+      const { texts, to, from, protect } = await readBody(req);
       if (!Array.isArray(texts) || !texts.length) return send(res, 400, { error: 'nema teksta' });
       if (!to) return send(res, 400, { error: 'ciljni jezik nedostaje' });
 
@@ -667,7 +700,7 @@ const server = http.createServer(async (req, res) => {
         if (t && t.trim()) { idx.push(i); payload.push(t); }
       });
 
-      const translated = await translateTexts(cfg, payload, to, from);
+      const translated = await translateTexts(cfg, payload, to, from, protect || []);
       const result = texts.map(() => '');
       idx.forEach((originalIndex, k) => { result[originalIndex] = translated[k] ?? ''; });
 

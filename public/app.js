@@ -41,6 +41,8 @@ const blank = () => ({
   // Language the LINES are written in. Deliberately separate from the voice:
   // deriving it from the voice produced .hr_HR.srt files full of English.
   lang: 'en-US',
+  // Brand names. Left unprotected, Azure turns "The Dog Habit" into "Navika psa".
+  protect: 'Lumenta Labs, Lumenta AI, The Dog Habit, UnmaskedWords, Unmasked Words, Bezmaske',
   titles: { mode: 'off', burn: false, srt: true, fontSize: 48, position: 'bottom' },
 });
 
@@ -428,7 +430,8 @@ async function translateLines() {
   const texts = S.segments.map((s) => s.text || '');
   const titles = S.segments.map((s) => s.title || '');
 
-  const body = (arr) => JSON.stringify({ texts: arr, to: target });
+  const protect = (S.protect || '').split(',').map((t) => t.trim()).filter(Boolean);
+  const body = (arr) => JSON.stringify({ texts: arr, to: target, protect });
   const call = (arr) =>
     api('/api/translate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body(arr) });
 
@@ -633,6 +636,7 @@ function hydrate() {
   $('titleBurn').checked = S.titles.burn;
   $('titleSrt').checked = S.titles.srt;
   syncOutputs();
+  $('protect').value = S.protect || '';
   if ($('contentLang').options.length) $('contentLang').value = S.lang;
   showLangWarning();
   if (VOICES.length) {
@@ -667,6 +671,7 @@ function wire() {
   $('save').onclick = guard(async () => { await save(); $('save').textContent = 'Spremljeno'; setTimeout(() => ($('save').textContent = 'Spremi'), 1200); });
   $('addSeg').onclick = () => { addSegment(); redraw(); };
   $('translate').onclick = guard(translateLines);
+  $('protect').oninput = (e) => (S.protect = e.target.value);
   $('autoSpace').onclick = autoSpace;
   $('scan').onclick = guard(scanZones);
   $('clearZones').onclick = () => {
