@@ -131,6 +131,7 @@ output { color: var(--text); font-variant-numeric: tabular-nums; }
 .seg-over .grow-field { flex: 1 1 260px; }
 .seg-over .grow-field input { width: 100%; }
 .stale { color: var(--warn); }
+.mt { color: var(--accent); }
 
 /* ---- timeline ---- */
 .timeline {

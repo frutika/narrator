@@ -68,6 +68,13 @@ Otvori `http://localhost:4173`.
    Naslov nije dio hasha za predmemoriju, pa njegova izmjena **ne troši Azure
    kvotu**.
 
+   **„Jezik teksta" nije isto što i glas.** Alat ne prevodi pri izvozu — titlovi
+   sadrže linije onakve kakve jesu. Zato jezik biraš sam. Dok se izvodio iz
+   glasa, odabir hrvatskog glasa na engleskom projektu davao je datoteku
+   `.hr_HR.srt` **punu engleskog teksta**, koju bi YouTube i Facebook
+   posluživali kao hrvatske titlove. Ako se glas i jezik teksta ne poklapaju,
+   alat to sada javi.
+
    **Imenovanje `.srt` datoteke nije kozmetika.** Facebook prihvaća titlove samo
    ako se datoteka zove `naziv.jezik_DRŽAVA.srt` — mala slova za jezik, velika za
    državu (`lumenta-labs-iris.en_US.srt`). Krivo ime i upload se odbija bez
@@ -84,6 +91,38 @@ Otvori `http://localhost:4173`.
 
 Projekt se sprema u `projects/<naziv>/` (`project.json` + `wav/`) i autosprema
 svakih 15 sekundi.
+
+## Druga jezična verzija
+
+1. **„Nova jezična verzija"** kopira projekt s istim timingom, zonama i
+   strukturom. **Zvuk se namjerno ne kopira** — inače bi stari jezik tiho ostao
+   u miksu.
+2. **„Prevedi automatski"** prevede sve linije i naslove na odabrani jezik
+   teksta. Prevedene linije dobiju oznaku **„strojni nacrt"** koja nestane čim
+   ih ručno dotakneš.
+3. Odaberi glas za taj jezik, pa **Sintetiziraj**.
+4. **„Rasporedi automatski"** — trajanje izgovora razlikuje se po jeziku, pa
+   stari timing više ne odgovara.
+
+Strojni prijevod je nacrt, ne isporuka. Za promo video koji prodaje kvalitetu
+pročitaj ga prije sinteze — pogotovo nazive proizvoda i stručne izraze, koje
+prevoditelji vole prevesti iako ne bi smjeli.
+
+### Ključ za prevoditelj
+
+Translator je **zaseban Azure resurs** od Speecha, s vlastitim ključem.
+Besplatni **F0** sloj daje **2 milijuna znakova mjesečno** — scenarij od tri
+minute troši oko dvije tisuće.
+
+Azure portal → Create a resource → **Translator** → Free F0. Zatim:
+
+```
+setx AZURE_TRANSLATOR_KEY "tvoj-kljuc"
+setx AZURE_TRANSLATOR_REGION "northeurope"
+```
+
+Regija se, ako je ne postaviš, preuzima od Speecha. Bez ključa je gumb
+„Prevedi automatski" onemogućen, a sve ostalo radi normalno.
 
 ## Spuštanje podloge
 

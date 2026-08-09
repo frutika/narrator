@@ -38,6 +38,9 @@ const blank = () => ({
   mix: { keepMusic: true, musicGain: 0.85, voiceGain: 1.0, duck: 'medium' },
   videoWidth: 1920,
   videoHeight: 1080,
+  // Language the LINES are written in. Deliberately separate from the voice:
+  // deriving it from the voice produced .hr_HR.srt files full of English.
+  lang: 'en-US',
   titles: { mode: 'off', burn: false, srt: true, fontSize: 48, position: 'bottom' },
 });
 
@@ -95,6 +98,7 @@ function renderSegments() {
         <span class="seg-id">${seg.id}</span>
         <span class="seg-dur">${seg.duration ? fmt(seg.duration) : '—'}</span>
         ${stale ? '<span class="stale">· izmijenjeno, treba ponovna sinteza</span>' : ''}
+        ${seg.mt ? '<span class="mt">· strojni nacrt</span>' : ''}
         <span class="spacer"></span>
         <button class="ghost icon" data-act="play"  ${seg.file ? '' : 'disabled'}>▶</button>
         <button class="ghost icon" data-act="over">⚙</button>
@@ -130,6 +134,8 @@ function renderSegments() {
       const act = e.target.dataset?.act;
       if (!act) return;
       const v = e.target.value;
+      // Touching the wording means a human has been over it - drop the draft mark.
+      if (act === 'text' || act === 'title') seg.mt = false;
       if (act === 'text') seg.text = v;
       // Only the on-screen wording - deliberately not part of audioKey, so
       // editing it never triggers a paid re-synthesis.
@@ -200,7 +206,25 @@ async function loadVoices() {
     sel.appendChild(o);
   });
   sel.value = S.voice ? S.voice.split('-').slice(0, 2).join('-') : (locales.includes('hr-HR') ? 'hr-HR' : 'en-US');
+
+  const cl = $('contentLang');
+  cl.innerHTML = '';
+  locales.forEach((l) => {
+    const o = document.createElement('option');
+    o.value = l;
+    o.textContent = `${l} — ${VOICES.find((v) => v.locale === l).localeName}`;
+    cl.appendChild(o);
+  });
+  cl.value = S.lang || sel.value;
+  S.lang = cl.value;
+
   onLocaleChange();
+}
+
+function showLangWarning() {
+  const w = langWarning();
+  $('langWarn').textContent = w;
+  $('langWarn').style.display = w ? '' : 'none';
 }
 
 function onLocaleChange() {
@@ -383,6 +407,47 @@ async function probe() {
   drawTimeline();
 }
 
+async function translateLines() {
+  const target = S.lang;
+  if (!target) throw new Error('Prvo odaberi jezik teksta.');
+
+  const withText = S.segments.filter((s) => s.text?.trim());
+  if (!withText.length) throw new Error('Nema teksta za prijevod.');
+
+  const sample = withText[0].text.slice(0, 60);
+  if (!confirm(
+    `Prevesti ${withText.length} linija na ${target}?\n\n` +
+      `Prva linija sada: "${sample}…"\n\n` +
+      'Postojeći tekst se PREPISUJE. Strojni prijevod je nacrt — pročitaj ga prije sinteze.'
+  )) return;
+
+  $('synthInfo').textContent = 'Prevodim…';
+  $('synthInfo').className = 'muted';
+
+  // Titles ride along in the same request so one call covers the whole project.
+  const texts = S.segments.map((s) => s.text || '');
+  const titles = S.segments.map((s) => s.title || '');
+
+  const body = (arr) => JSON.stringify({ texts: arr, to: target });
+  const call = (arr) =>
+    api('/api/translate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body(arr) });
+
+  const [textRes, titleRes] = await Promise.all([
+    call(texts),
+    titles.some((t) => t.trim()) ? call(titles) : Promise.resolve({ translations: titles, chars: 0 }),
+  ]);
+
+  S.segments.forEach((s, i) => {
+    if (textRes.translations[i]) s.text = textRes.translations[i];
+    if (titleRes.translations[i]) s.title = titleRes.translations[i];
+    s.mt = true; // machine draft - shown in the UI until you edit the line
+  });
+
+  $('synthInfo').textContent =
+    `Prevedeno na ${target} — ${textRes.chars + titleRes.chars} znakova. Pročitaj prije sinteze.`;
+  redraw();
+}
+
 async function synthesize() {
   if (!S.name) throw new Error('Upiši naziv projekta prije sinteze.');
   const btn = $('synth');
@@ -433,7 +498,7 @@ async function render() {
         mode: S.titles.mode,
         burn: S.titles.burn,
         srt: S.titles.srt,
-        locale: localeOf(S.voice),
+        locale: S.lang,
         segments: ready.map((s) => ({ title: s.title, text: s.text, start: s.start, duration: s.duration })),
         style: {
           width: S.videoWidth,
@@ -466,8 +531,16 @@ async function render() {
   }, 800);
 }
 
-// "en-US-Iris:MAI-Voice-1" -> "en-US". Facebook needs it to name the file.
+// "en-US-Iris:MAI-Voice-1" -> "en-US".
 const localeOf = (voice) => (voice || '').split('-').slice(0, 2).join('-');
+
+// A German voice reading Croatian lines is almost always a mistake, and it
+// would also mislabel the caption file. Say so rather than silently comply.
+function langWarning() {
+  const v = localeOf(S.voice);
+  if (!v || !S.lang || v === S.lang) return '';
+  return `Glas je ${v}, a tekst je označen kao ${S.lang}. Titlovi će nositi oznaku ${S.lang}.`;
+}
 
 // The server decides the exact filename, so the Facebook naming rule lives in
 // one place. Read it back from the response instead of guessing here.
@@ -489,7 +562,7 @@ async function downloadSrt() {
     body: JSON.stringify({
       mode,
       baseName: base,
-      locale: localeOf(S.voice),
+      locale: S.lang,
       segments: ready.map((s) => ({ title: s.title, text: s.text, start: s.start, duration: s.duration })),
     }),
   });
@@ -509,6 +582,26 @@ const save = () => api('/api/project', {
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(S),
 });
+
+async function duplicateProject() {
+  if (!S.name) throw new Error('Prvo otvori ili spremi projekt.');
+  const to = prompt('Naziv nove jezične verzije:', `${S.name}-hr`);
+  if (!to) return;
+  const lang = prompt('Jezik teksta te verzije (npr. hr-HR, de-DE):', 'hr-HR');
+  if (!lang) return;
+
+  await save();
+  await api('/api/project/duplicate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from: S.name, to, lang }),
+  });
+  await openProject(to);
+  alert(
+    `Napravljena kopija "${to}".\n\nTiming i struktura su isti, ali zvuk nije kopiran — ` +
+      'linije treba prevesti, odabrati glas za taj jezik i ponovno sintetizirati.'
+  );
+}
 
 async function openProject(name) {
   S = Object.assign(blank(), await api(`/api/project?name=${encodeURIComponent(name)}`));
@@ -540,6 +633,8 @@ function hydrate() {
   $('titleBurn').checked = S.titles.burn;
   $('titleSrt').checked = S.titles.srt;
   syncOutputs();
+  if ($('contentLang').options.length) $('contentLang').value = S.lang;
+  showLangWarning();
   if (VOICES.length) {
     // Point the language filter at the project's own voice first. Without this
     // the filter keeps its previous value, the saved voice is not in the list,
@@ -571,6 +666,7 @@ function wire() {
   $('render').onclick = guard(render);
   $('save').onclick = guard(async () => { await save(); $('save').textContent = 'Spremljeno'; setTimeout(() => ($('save').textContent = 'Spremi'), 1200); });
   $('addSeg').onclick = () => { addSegment(); redraw(); };
+  $('translate').onclick = guard(translateLines);
   $('autoSpace').onclick = autoSpace;
   $('scan').onclick = guard(scanZones);
   $('clearZones').onclick = () => {
@@ -585,7 +681,7 @@ function wire() {
   $('projectList').onchange = guard((e) => e.target.value && openProject(e.target.value));
 
   $('locale').onchange = onLocaleChange;
-  $('voice').onchange = (e) => { S.voice = e.target.value; fillStyleSelect($('style'), S.voice, S.style, false); S.style = $('style').value || 'none'; redraw(); };
+  $('voice').onchange = (e) => { S.voice = e.target.value; fillStyleSelect($('style'), S.voice, S.style, false); S.style = $('style').value || 'none'; showLangWarning(); redraw(); };
   $('style').onchange = (e) => { S.style = e.target.value; redraw(); };
 
   for (const [id, key] of [['styleDegree', 'styleDegree'], ['rate', 'rate'], ['pitch', 'pitch']]) {
@@ -595,6 +691,8 @@ function wire() {
     $(id).oninput = (e) => (S[key] = Number(e.target.value));
   }
   $('blockPad').oninput = (e) => { S.blockPad = Number(e.target.value); drawTimeline(); };
+  $('contentLang').onchange = (e) => { S.lang = e.target.value; showLangWarning(); };
+  $('duplicate').onclick = guard(duplicateProject);
   $('titleMode').onchange = (e) => (S.titles.mode = e.target.value);
   $('titlePos').onchange = (e) => (S.titles.position = e.target.value);
   $('titleSize').oninput = (e) => { S.titles.fontSize = Number(e.target.value); syncOutputs(); };
@@ -616,6 +714,12 @@ function wire() {
   const pill = $('status');
   pill.textContent = st.hasKey ? `Azure ${st.region}` : 'Azure ključ nije postavljen';
   pill.className = 'pill ' + (st.hasKey ? 'ok' : 'err');
+
+  if (!st.hasTranslator) {
+    const b = $('translate');
+    b.disabled = true;
+    b.title = 'AZURE_TRANSLATOR_KEY nije postavljen — vidi README.';
+  }
 
   st.projects.forEach((p) => {
     const o = document.createElement('option');

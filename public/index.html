@@ -13,6 +13,7 @@
       <input id="projectName" placeholder="naziv projekta" />
       <select id="projectList"><option value="">— otvori projekt —</option></select>
       <button id="save" class="ghost">Spremi</button>
+      <button id="duplicate" class="ghost">Nova jezična verzija</button>
       <span id="status" class="pill"></span>
     </div>
   </header>
@@ -57,6 +58,7 @@
       <div id="segments"></div>
       <div class="row">
         <button id="addSeg" class="ghost">+ Dodaj liniju</button>
+        <button id="translate" class="ghost">Prevedi automatski</button>
         <button id="synth">Sintetiziraj</button>
         <span id="synthInfo" class="muted"></span>
       </div>
@@ -82,6 +84,9 @@
     <section>
       <h2>5 · Titlovi</h2>
       <div class="row wrap">
+        <label>Jezik teksta
+          <select id="contentLang"></select>
+        </label>
         <label>Što se prikazuje
           <select id="titleMode">
             <option value="off">ništa</option>
@@ -102,6 +107,7 @@
         <label class="check"><input id="titleSrt" type="checkbox" checked /> Spremi .srt uz video</label>
         <button id="downloadSrt" class="ghost">Preuzmi .srt</button>
       </div>
+      <p id="langWarn" class="muted stale"></p>
       <p class="muted">
         Kratki naslov po liniji upisuješ pod <strong>⚙</strong>. Ako ga nema, „izgovoreni tekst"
         koristi cijelu rečenicu. <strong>Upisivanje u sliku traži ponovno kodiranje videa</strong> —

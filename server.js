@@ -25,6 +25,15 @@ function loadConfig() {
     // Environment wins, so the key never has to live in a file.
     azureKey: process.env.AZURE_SPEECH_KEY || cfg.azureKey || '',
     azureRegion: process.env.AZURE_SPEECH_REGION || cfg.azureRegion || 'westeurope',
+    // Translator is a separate Azure resource from Speech, with its own key.
+    // Its region defaults to the Speech one because they are usually the same.
+    translatorKey: process.env.AZURE_TRANSLATOR_KEY || cfg.translatorKey || '',
+    translatorRegion:
+      process.env.AZURE_TRANSLATOR_REGION ||
+      cfg.translatorRegion ||
+      process.env.AZURE_SPEECH_REGION ||
+      cfg.azureRegion ||
+      'westeurope',
     ffmpeg: cfg.ffmpeg || findBinary('ffmpeg'),
     ffprobe: cfg.ffprobe || findBinary('ffprobe'),
   };
@@ -229,6 +238,67 @@ async function synthesize(cfg, ssml, outFile, attempt = 1) {
   }
 
   await fsp.writeFile(outFile, Buffer.from(await res.arrayBuffer()));
+}
+
+// ---------------------------------------------------------------- translation
+
+// Translator wants a bare language code ("hr"), not a locale ("hr-HR").
+const langCode = (locale) => (locale || '').split('-')[0].toLowerCase();
+
+/**
+ * Machine translation is a first draft, never a delivery. It exists so nobody
+ * retypes twelve lines by hand; the wording still gets read before it is voiced.
+ */
+async function translateTexts(cfg, texts, to, from) {
+  if (!cfg.translatorKey) {
+    throw new Error('AZURE_TRANSLATOR_KEY nije postavljen — vidi README.');
+  }
+
+  const url = new URL('https://api.cognitive.microsofttranslator.com/translate');
+  url.searchParams.set('api-version', '3.0');
+  url.searchParams.set('to', langCode(to));
+  if (from) url.searchParams.set('from', langCode(from));
+  url.searchParams.set('textType', 'plain');
+
+  const out = [];
+  // The API caps a request by element count and total characters, so send the
+  // lines in conservative batches rather than trusting one big call.
+  const MAX_ITEMS = 50;
+  const MAX_CHARS = 40000;
+
+  let batch = [];
+  let chars = 0;
+
+  const flush = async () => {
+    if (!batch.length) return;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Ocp-Apim-Subscription-Key': cfg.translatorKey,
+        'Ocp-Apim-Subscription-Region': cfg.translatorRegion,
+        'Content-Type': 'application/json; charset=UTF-8',
+      },
+      body: JSON.stringify(batch.map((t) => ({ Text: t }))),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      const hint = res.status === 401 ? ' (ključ ili regija ne odgovaraju)' : '';
+      throw new Error(`Azure Translator ${res.status}${hint}${detail ? ` — ${detail.slice(0, 300)}` : ''}`);
+    }
+    const data = await res.json();
+    for (const item of data) out.push(item.translations?.[0]?.text ?? '');
+    batch = [];
+    chars = 0;
+  };
+
+  for (const t of texts) {
+    if (batch.length >= MAX_ITEMS || chars + t.length > MAX_CHARS) await flush();
+    batch.push(t);
+    chars += t.length;
+  }
+  await flush();
+
+  return out;
 }
 
 // ---------------------------------------------------------------- subtitles
@@ -484,6 +554,7 @@ const server = http.createServer(async (req, res) => {
     if (route === '/api/status') {
       return send(res, 200, {
         hasKey: Boolean(cfg.azureKey),
+        hasTranslator: Boolean(cfg.translatorKey),
         region: cfg.azureRegion,
         ffmpeg: cfg.ffmpeg,
         projects: await listProjects(),
@@ -526,6 +597,32 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true, slug: slug(project.name) });
     }
 
+    // Making another language version means the same timing and structure but
+    // different words and a different voice, so the audio is deliberately NOT
+    // copied - keeping it would silently leave the old language in the mix.
+    if (req.method === 'POST' && route === '/api/project/duplicate') {
+      const { from, to, lang } = await readBody(req);
+      const src = path.join(projectDir(from), 'project.json');
+      if (!fs.existsSync(src)) return send(res, 404, { error: 'no such project' });
+      if (!to?.trim()) return send(res, 400, { error: 'novi naziv nedostaje' });
+      if (fs.existsSync(path.join(projectDir(to), 'project.json'))) {
+        return send(res, 400, { error: 'projekt s tim nazivom vec postoji' });
+      }
+
+      const project = await readJson(src);
+      project.name = to.trim();
+      if (lang) project.lang = lang;
+      project.segments = (project.segments || []).map((s) => ({
+        ...s,
+        file: null,
+        duration: 0,
+        synthKey: null,
+      }));
+
+      await saveProject(project);
+      return send(res, 200, { ok: true, slug: slug(project.name) });
+    }
+
     if (req.method === 'GET' && route === '/api/project') {
       const dir = projectDir(url.searchParams.get('name'));
       const file = path.join(dir, 'project.json');
@@ -556,6 +653,25 @@ const server = http.createServer(async (req, res) => {
         results.push({ id: seg.id, file, cached, duration: await probeDuration(cfg, full) });
       }
       return send(res, 200, { results });
+    }
+
+    if (req.method === 'POST' && route === '/api/translate') {
+      const { texts, to, from } = await readBody(req);
+      if (!Array.isArray(texts) || !texts.length) return send(res, 400, { error: 'nema teksta' });
+      if (!to) return send(res, 400, { error: 'ciljni jezik nedostaje' });
+
+      // Empty lines are kept in place so indexes still line up with segments.
+      const idx = [];
+      const payload = [];
+      texts.forEach((t, i) => {
+        if (t && t.trim()) { idx.push(i); payload.push(t); }
+      });
+
+      const translated = await translateTexts(cfg, payload, to, from);
+      const result = texts.map(() => '');
+      idx.forEach((originalIndex, k) => { result[originalIndex] = translated[k] ?? ''; });
+
+      return send(res, 200, { translations: result, chars: payload.join('').length });
     }
 
     if (req.method === 'POST' && route === '/api/subtitles') {
