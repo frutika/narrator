@@ -428,10 +428,40 @@ async function readJson(file) {
   return JSON.parse(raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw);
 }
 
-async function saveProject(project) {
+const filledSegments = (p) => (p?.segments || []).filter((s) => s?.text && s.text.trim()).length;
+
+/**
+ * Autosave writes whatever the browser holds. A tab that has not loaded a
+ * project yet holds one empty line - and that used to land on top of a finished
+ * twelve-line project with the same name. Twice.
+ *
+ * So a save that would materially shrink an existing project is refused unless
+ * it is explicitly forced, and an unnamed project is never written at all.
+ */
+async function saveProject(project, { force = false } = {}) {
+  if (!project?.name || !project.name.trim()) {
+    throw Object.assign(new Error('projekt nema naziv'), { code: 400 });
+  }
+
   const dir = projectDir(project.name);
+  const file = path.join(dir, 'project.json');
+
+  if (!force && fs.existsSync(file)) {
+    const existing = await readJson(file).catch(() => null);
+    const had = filledSegments(existing);
+    const has = filledSegments(project);
+    if (had > 0 && has < had) {
+      throw Object.assign(
+        new Error(
+          `spremanje bi smanjilo projekt "${project.name}" s ${had} na ${has} popunjenih linija — odbijeno`
+        ),
+        { code: 409, shrink: { had, has } }
+      );
+    }
+  }
+
   await fsp.mkdir(path.join(dir, 'wav'), { recursive: true });
-  await fsp.writeFile(path.join(dir, 'project.json'), JSON.stringify(project, null, 2));
+  await fsp.writeFile(file, JSON.stringify(project, null, 2));
   return dir;
 }
 
@@ -754,7 +784,9 @@ const server = http.createServer(async (req, res) => {
 
     return send(res, 404, { error: 'unknown route' });
   } catch (err) {
-    return send(res, 500, { error: err.message });
+    // Guards throw with an explicit code so the UI can tell "you are about to
+    // destroy something" apart from "the server broke".
+    return send(res, err.code || 500, { error: err.message, shrink: err.shrink });
   }
 });
 

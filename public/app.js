@@ -663,6 +663,7 @@ async function duplicateProject() {
 
 async function openProject(name) {
   S = Object.assign(blank(), await api(`/api/project?name=${encodeURIComponent(name)}`));
+  S.loaded = true; // from here on autosave is safe
   hydrate();
 }
 
@@ -723,7 +724,13 @@ function wire() {
   $('probe').onclick = guard(probe);
   $('synth').onclick = guard(synthesize);
   $('render').onclick = guard(render);
-  $('save').onclick = guard(async () => { await save(); $('save').textContent = 'Spremljeno'; setTimeout(() => ($('save').textContent = 'Spremi'), 1200); });
+  $('save').onclick = guard(async () => {
+    if (!S.name?.trim()) throw new Error('Upiši naziv projekta.');
+    await save();
+    S.loaded = true; // an explicit save is consent to keep autosaving
+    $('save').textContent = 'Spremljeno';
+    setTimeout(() => ($('save').textContent = 'Spremi'), 1200);
+  });
   $('addSeg').onclick = () => { addSegment(); redraw(); };
   $('translate').onclick = guard(translateLines);
   $('protect').oninput = (e) => (S.protect = e.target.value);
@@ -765,7 +772,12 @@ function wire() {
   $('musicGain').oninput = (e) => { S.mix.musicGain = Number(e.target.value); syncOutputs(); };
   $('voiceGain').oninput = (e) => { S.mix.voiceGain = Number(e.target.value); syncOutputs(); };
 
-  setInterval(() => { if (S.name) save().catch(() => {}); }, 15000);
+  // Only autosave a project the user actually opened or saved on purpose. A
+  // freshly loaded tab holds one empty line, and that used to overwrite a
+  // finished project the moment its name matched.
+  setInterval(() => {
+    if (S.name && S.loaded) save().catch(() => {});
+  }, 15000);
 }
 
 (async function init() {
