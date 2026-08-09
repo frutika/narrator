@@ -245,19 +245,35 @@ const paddedZones = () =>
     .map(([a, b]) => [Math.max(0, a - S.blockPad), b + S.blockPad])
     .sort((x, y) => x[0] - y[0]);
 
-const hitsZone = (start, dur, zones = paddedZones()) =>
-  zones.find(([a, b]) => start < b && start + dur > a);
+// A line placed to end exactly on a zone edge can overlap it by a fraction of a
+// millisecond once the start is rounded to hundredths. That is inaudible, but a
+// strict comparison reports it as a collision. 20 ms of tolerance is well below
+// anything a listener could notice and well above the arithmetic error.
+const EPS = 0.02;
 
-// Walk the timeline placing each line, skipping past any zone it would land on.
+const hitsZone = (start, dur, zones = paddedZones()) =>
+  zones.find(([a, b]) => start < b - EPS && start + dur > a + EPS);
+
+// Walk the timeline placing each line around the blocked zones.
+//
+// When a line would land on a zone there are two ways out: finish just before
+// the zone, or jump past it. Jumping throws away whatever was left of the
+// window, which on a tight timeline is what forces a collision later. So try
+// fitting before first, and only jump when the line genuinely does not fit.
 function layout(gap, ready, zones) {
   const starts = [];
-  let t = S.leadIn;
+  let earliest = S.leadIn; // no line may start before this
   for (const s of ready) {
+    let t = earliest;
     let guard = 0;
     let clash;
-    while ((clash = hitsZone(t, s.duration, zones)) && guard++ < 50) t = clash[1];
+    while ((clash = hitsZone(t, s.duration, zones)) && guard++ < 50) {
+      // Floor to hundredths so the value survives the rounding applied later.
+      const before = Math.floor((clash[0] - s.duration) * 100) / 100;
+      t = before >= earliest ? before : clash[1];
+    }
     starts.push(t);
-    t += s.duration + gap;
+    earliest = t + s.duration + gap;
   }
   return starts;
 }
@@ -280,19 +296,37 @@ function autoSpace() {
     return;
   }
 
-  // Zones make the end time a step function of gap, so solve for it numerically.
-  let lo = 0;
-  let hi = Math.max(20, S.videoDuration);
-  for (let i = 0; i < 60; i++) {
-    const mid = (lo + hi) / 2;
-    if (endOf(layout(mid, ready, zones)) > target) hi = mid;
-    else lo = mid;
+  // Zones turn the end time into a step function of the gap, so a binary search
+  // lands on whatever discontinuity it happens to hit - and it optimises for
+  // "fits" while ignoring collisions entirely. Scanning candidate gaps and
+  // picking the best feasible one is both simpler and actually correct: on the
+  // German cut it removed a collision the binary search could not see.
+  const maxGap = (S.videoDuration - S.leadIn - S.tailOut) / Math.max(1, ready.length - 1);
+  const roundStarts = (st) => st.map((x) => Math.round(x * 100) / 100);
+
+  let best = null;
+  const STEPS = 3000;
+  for (let i = 0; i <= STEPS; i++) {
+    const gap = (maxGap * i) / STEPS;
+    const st = layout(gap, ready, zones);
+    if (endOf(st) > target) continue;
+    const rounded = roundStarts(st);
+    const bad = rounded.filter((x, j) => hitsZone(x, ready[j].duration, zones)).length;
+    // Fewest collisions wins; among equals, the most generous spacing.
+    if (!best || bad < best.bad || (bad === best.bad && gap > best.gap)) best = { gap, st: rounded, bad };
   }
 
-  const starts = layout(lo, ready, zones);
-  ready.forEach((s, i) => (s.start = Math.round(starts[i] * 100) / 100));
+  if (!best) {
+    $('timingInfo').className = 'muted stale';
+    $('timingInfo').textContent = `Naracija traje ${fmt(speech)} i ne stane u ${fmt(S.videoDuration)}.`;
+    return;
+  }
 
-  const collisions = ready.filter((s) => hitsZone(s.start, s.duration, zones)).length;
+  const starts = best.st;
+  ready.forEach((s, i) => (s.start = starts[i]));
+
+  const collisions = best.bad;
+  const lo = best.gap;
   $('timingInfo').className = 'muted' + (collisions ? ' stale' : '');
   $('timingInfo').textContent =
     `Govor ${fmt(speech)} · pauza ${lo.toFixed(2)} s · završava ${fmt(endOf(starts))}` +
