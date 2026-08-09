@@ -645,6 +645,13 @@ const server = http.createServer(async (req, res) => {
       const project = await readJson(src);
       project.name = to.trim();
       if (lang) project.lang = lang;
+
+      // Carrying the source project's output path over is how a language
+      // version silently overwrites the master it was copied from.
+      if (project.outPath) {
+        const ext = path.extname(project.outPath) || '.mp4';
+        project.outPath = path.join(path.dirname(project.outPath), `${slug(project.name)}${ext}`);
+      }
       project.segments = (project.segments || []).map((s) => ({
         ...s,
         file: null,
@@ -720,6 +727,20 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'POST' && route === '/api/render') {
       const body = await readBody(req);
+
+      // A language version that kept the original's output path will happily
+      // overwrite the master it was copied from - 227 MB gone without a word.
+      // Refuse, and let the caller decide.
+      if (body.outPath && !body.overwrite && fs.existsSync(body.outPath)) {
+        const st = await fsp.stat(body.outPath);
+        return send(res, 409, {
+          error: 'datoteka vec postoji',
+          path: body.outPath,
+          sizeMb: +(st.size / 1048576).toFixed(1),
+          modified: st.mtime.toISOString(),
+        });
+      }
+
       const jobId = crypto.randomUUID();
       jobs.set(jobId, { status: 'queued' });
       renderJob(cfg, jobId, body);

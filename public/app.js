@@ -517,10 +517,11 @@ async function render() {
   if (!ready.length) throw new Error('Nema sintetiziranih linija.');
   if (!S.videoDuration) throw new Error('Video nije učitan.');
 
-  const { jobId } = await api('/api/render', {
+  const start = (overwrite) => api('/api/render', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      overwrite,
       projectName: S.name,
       videoPath: S.videoPath,
       outPath: $('outPath').value.trim(),
@@ -546,6 +547,26 @@ async function render() {
       },
     }),
   });
+
+  let jobId;
+  try {
+    ({ jobId } = await start(false));
+  } catch (err) {
+    // The server refuses to overwrite silently; ask, then say so explicitly.
+    const m = /datoteka vec postoji/.test(err.message);
+    if (!m) throw err;
+    const path = $('outPath').value.trim();
+    if (!confirm(
+      `Datoteka već postoji:\n${path}\n\n` +
+        'Renderiranje će je PREPISATI. Ako je to master druge jezične verzije, ' +
+        'prvo promijeni izlaznu putanju.\n\nPrepisati?'
+    )) {
+      $('renderInfo').textContent = 'Render otkazan — promijeni izlaznu putanju.';
+      $('renderInfo').className = 'muted';
+      return;
+    }
+    ({ jobId } = await start(true));
+  }
 
   const burning = S.titles.burn && S.titles.mode !== 'off';
   $('render').disabled = true;
